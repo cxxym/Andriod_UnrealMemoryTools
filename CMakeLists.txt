@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.10)
-set(NDK_PATH E:/ndk/android-ndk-r29)
 set(CMAKE_TOOLCHAIN_FILE ${NDK_PATH}/build/cmake/android.toolchain.cmake)
 set(CMAKE_SYSTEM_NAME Android)
 set(CMAKE_BUILD_TYPE Release)
