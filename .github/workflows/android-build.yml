@@ -23,17 +23,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   android-build:
     name: Android ARM64 Release
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      NDK_VERSION: r27c
+      ANDROID_ABI: arm64-v8a
+      ANDROID_PLATFORM: android-30
 
     steps:
       # 1. 拉取源码
       - name: 拉取项目源码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
+          persist-credentials: false
 
       # 2. 安装依赖
       - name: 安装构建工具
@@ -47,15 +62,15 @@ jobs:
       # 3. 安装 Android NDK
       - name: 配置 Android NDK
         id: ndk
-        uses: nttld/setup-ndk@v1
+        uses: nttld/setup-ndk@v1.6.0
         with:
-          ndk-version: r27c
+          ndk-version: ${{ env.NDK_VERSION }}
 
       # 4. 配置环境变量
       - name: 设置环境变量
         run: |
-          echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       # 5. CMake 配置
       - name: 配置 ARM64 Release
@@ -63,9 +78,11 @@ jobs:
           cmake -S . -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DNDK_PATH="$ANDROID_NDK_HOME" \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-21
+            -DANDROID_ABI="$ANDROID_ABI" \
+            -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
+            -DANDROID_STL=c++_static
 
       # 6. 编译
       - name: 编译项目
@@ -73,60 +90,75 @@ jobs:
           cmake --build build \
             --parallel 2
 
-      # 7. 收集编译产物
-      - name: 整理构建文件
-        shell: bash
+      # 7. 校验真实输出，避免打包空目录或主机程序
+      - name: 校验 Android ARM64 二进制
         run: |
-          set -e
+          binary="outputs/$ANDROID_ABI/UnrealMemoryTools"
+          test -s "$binary"
+          test -x "$binary"
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" \
+            --file-header "$binary" | tee build/elf-header.txt
+          grep -q 'Class:.*ELF64' build/elf-header.txt
+          grep -q 'Machine:.*AArch64' build/elf-header.txt
 
+      # 8. 按 CMake 实际输出路径收集二进制
+      - name: 整理构建文件
+        run: |
           mkdir -p package/UnrealMemoryTools
-
-          # 收集动态库、静态库和可执行文件
-          find build -type f \
-            \( -name '*.so' -o -name '*.a' -o -perm -111 \) \
-            ! -path '*/CMakeFiles/*' \
-            ! -path '*/_deps/*' \
-            ! -path '*/Testing/*' \
-            -print0 |
-          while IFS= read -r -d '' file; do
-            mkdir -p "package/UnrealMemoryTools/$(dirname "${file#build/}")"
-            cp "$file" "package/UnrealMemoryTools/${file#build/}"
-          done
-
-          # 检查是否收集到文件
-          if [ -z "$(find package/UnrealMemoryTools -type f -print -quit)" ]; then
-            echo "错误：没有找到可发布的编译产物"
-            exit 1
-          fi
+          install -m 755 "outputs/$ANDROID_ABI/UnrealMemoryTools" \
+            package/UnrealMemoryTools/UnrealMemoryTools
+          cp README.md LICENSE package/UnrealMemoryTools/
+          (
+            cd package/UnrealMemoryTools
+            sha256sum UnrealMemoryTools > UnrealMemoryTools.sha256
+          )
 
           # 生成构建信息
           {
-            echo "架构：arm64-v8a"
+            echo "架构：$ANDROID_ABI"
+            echo "最低 Android API：${ANDROID_PLATFORM#android-}"
             echo "类型：Release"
-            echo "NDK：r27c"
+            echo "NDK：$NDK_VERSION"
             echo "提交：${GITHUB_SHA}"
             echo "分支：${GITHUB_REF_NAME}"
           } > package/BUILD_INFO.txt
 
-      # 8. 压缩 ZIP
+      # 9. 压缩 ZIP，保留 ELF 可执行权限
       - name: 打包 ZIP
         run: |
           cd package
           zip -r ../UnrealMemoryTools-Android-arm64.zip .
 
-      # 9. 计算 SHA256
+      # 10. 计算 SHA256
       - name: 生成文件校验值
         run: |
           sha256sum UnrealMemoryTools-Android-arm64.zip \
             > UnrealMemoryTools-Android-arm64.zip.sha256
 
-      # 10. 上传构建产物
+      # 11. 上传构建产物
       - name: 上传 ZIP
-        uses: actions/upload-artifact@v4
+        id: artifact
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: UnrealMemoryTools-Android-arm64
           path: |
             UnrealMemoryTools-Android-arm64.zip
             UnrealMemoryTools-Android-arm64.zip.sha256
           if-no-files-found: error
+          compression-level: 0
           retention-days: 30
+
+      - name: 输出构建摘要
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        run: |
+          {
+            echo '### Android ARM64 构建成功'
+            echo "- 提交：\`$GITHUB_SHA\`"
+            echo "- 架构：\`$ANDROID_ABI\`，最低 API：\`${ANDROID_PLATFORM#android-}\`"
+            echo "- [下载构建产物]($ARTIFACT_URL)"
+            echo ''
+            echo '```text'
+            cat UnrealMemoryTools-Android-arm64.zip.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

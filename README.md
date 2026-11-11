@@ -124,11 +124,13 @@ Toolchain:
 
 ```bash
 cd UnrealMemoryTools
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNDK_PATH=/path/to/android-ndk
 cmake --build build -j4
 ```
 
 The output binary lands in `UnrealMemoryTools/outputs/arm64-v8a/`.
+
+GitHub Actions builds the Android ARM64 Release binary with NDK r27c and API 30 on pushes to `main` / `master`, `v*` tags, pull requests, or a manual run of **Android ARM64 自动构建**. Download `UnrealMemoryTools-Android-arm64` from the run's **Artifacts** section; it contains the binary ZIP and its SHA256 checksum. Artifacts are retained for 30 days.
 
 > Tip: building under a Chinese-character path may trigger `GetOverlappedResult` errors with Ninja on Windows. Prefer building inside CLion or use an ASCII path.
 
@@ -272,11 +274,13 @@ I: 使用自动 Profile (UE4/UE5 通用) 进行探测。
 
 ```bash
 cd UnrealMemoryTools
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DNDK_PATH=/path/to/android-ndk
 cmake --build build -j4
 ```
 
 产物在 `UnrealMemoryTools/outputs/arm64-v8a/`。
+
+推送到 `main` / `master`、推送 `v*` 标签、提交 PR，或手动运行 **Android ARM64 自动构建**，都会通过 GitHub Actions 使用 NDK r27c、API 30 构建 Android ARM64 Release 二进制。在构建页面的 **Artifacts** 中下载 `UnrealMemoryTools-Android-arm64`，其中包含二进制 ZIP 和 SHA256 校验文件，产物保留 30 天。
 
 > 注意：Windows 上 Ninja 在中文路径下会偶发 `GetOverlappedResult` 报错。建议在 CLion 内构建，或换成纯英文路径。
 
